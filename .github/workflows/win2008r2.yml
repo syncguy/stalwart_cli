@@ -86,11 +86,18 @@ jobs:
             throw "NT 6.1 directory regression: dirs/dirs-sys present in target dependency graph"
           }
           "Target-specific directory dependency gate PASS" | Tee-Object -FilePath evidence/nt61-dirs-graph-gate.txt
-          if ($cfg -notcontains 'target_vendor="win7"') { throw "Target does not select the NT 6.1 Ratatui feature set" }
-          if ($graph -match '\bratatui(?:-core|-crossterm)? feature "underline-color"') {
-            throw "NT 6.1 TUI regression: unsupported underline-color enabled in dependency graph"
+          if ($cfg -notcontains 'target_vendor="win7"') { throw "Unexpected NT 6.1 target vendor" }
+          # The backend enables underline-color by default. Require the
+          # checked-in capability-guarded backend rather than rejecting it.
+          $backend = cargo "+$env:RUST_TOOLCHAIN" tree --locked --target $env:TARGET -i ratatui-crossterm
+          if ($LASTEXITCODE -ne 0) { throw "Ratatui backend inventory failed" }
+          $backend | Tee-Object -FilePath evidence/nt61-tui-backend.txt
+          if (($backend -join "`n") -notmatch '(?im)^ratatui-crossterm v0\.1\.2 \([^\r\n]*[\\/]vendor[\\/]ratatui-crossterm\)') {
+            throw "NT 6.1 TUI regression: expected local capability-guarded Ratatui backend"
           }
-          "NT 6.1 underline-color feature gate PASS (not a physical TUI test)" | Tee-Object -FilePath evidence/nt61-tui-graph-gate.txt
+          Get-FileHash vendor/ratatui-crossterm/Cargo.toml,vendor/ratatui-crossterm/src/lib.rs -Algorithm SHA256 |
+            Format-List | Out-String | Add-Content evidence/nt61-tui-backend.txt
+          "NT 6.1 patched backend selection gate PASS (not a physical TUI test)" | Tee-Object -FilePath evidence/nt61-tui-graph-gate.txt
 
       - name: Compile minimal NT 6.1 smoke program
         shell: pwsh
@@ -117,7 +124,7 @@ jobs:
         run: |
           cargo "+$env:RUST_TOOLCHAIN" -Z build-std=std,panic_abort build --release --locked --target $env:TARGET --bin stalwart-cli
           if ($LASTEXITCODE -ne 0) { throw "Stalwart CLI cross-target compilation failed" }
-          git diff --exit-code -- Cargo.toml Cargo.lock src
+          git diff --exit-code -- Cargo.toml Cargo.lock src vendor
           if ($LASTEXITCODE -ne 0) { throw "Unexpected tracked Rust source or dependency changes during CI" }
 
       - name: Hash binary and collect PE evidence

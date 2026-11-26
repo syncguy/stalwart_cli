@@ -31,6 +31,7 @@ percent-encoding = "2"
 malevich = { version = "=1.25.0", default-features = false, features = ["ratatui"] }
 encodify = "1.0"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "rustls", "json"] }
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm", "layout-cache", "underline-color"] }
 rpassword = "7.5"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order", "raw_value"] }
@@ -43,19 +44,15 @@ unicode-width = "0.2"
 qrcode = { version = "0.14", default-features = false }
 getrandom = "0.3"
 
-# The Crossterm backend emits SetUnderlineColor(Reset) after every draw when
-# underline-color is enabled. The legacy WinAPI cannot execute that command.
-# Keep normal underline styling and all other backend features on NT 6.1.
-[target.'cfg(all(windows, target_vendor = "win7"))'.dependencies]
-ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
-
-[target.'cfg(not(all(windows, target_vendor = "win7")))'.dependencies]
-ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm", "layout-cache", "underline-color"] }
-
 # MSVC Windows uses src/platform_dirs.rs instead of dirs/dirs-sys to keep
 # the Windows 7 loader free of the COMBASE import. Other targets retain dirs.
 [target.'cfg(not(all(windows, target_env = "msvc")))'.dependencies]
 dirs = "7"
+
+# Upstream backend defaults to underline-color even when the CLI disables it.
+# Keep the feature; use the local MIT-licensed source with a Windows VT guard.
+[patch.crates-io]
+ratatui-crossterm = { path = "vendor/ratatui-crossterm" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(stalwart_cli_tests)'] }
