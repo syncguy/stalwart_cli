@@ -82,7 +82,7 @@ impl Launch {
             SidebarChoice::Always => SidebarMode::Always,
             SidebarChoice::Auto => SidebarMode::Auto,
         });
-        let data = dirs::data_local_dir().map(|d| d.join("stalwart-cli"));
+        let data = crate::platform_dirs::data_local_dir().map(|d| d.join("stalwart-cli"));
         Ok(Launch {
             url: global.url.clone(),
             auth,
@@ -96,9 +96,9 @@ impl Launch {
             palette,
             sidebar,
             debug: global.debug || env::var_os("STALWART_DEBUG").is_some_and(|v| !v.is_empty()),
-            cache_dir: dirs::cache_dir(),
+            cache_dir: crate::platform_dirs::cache_dir(),
             auth_dir: data.as_ref().map(|d| d.join("auth")),
-            prefs_path: dirs::config_dir().map(|d| d.join("stalwart-cli").join("tui.json")),
+            prefs_path: crate::platform_dirs::config_dir().map(|d| d.join("stalwart-cli").join("tui.json")),
             writer_id: std::process::id(),
         })
     }
