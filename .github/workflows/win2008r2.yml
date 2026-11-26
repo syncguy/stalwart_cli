@@ -1,5 +1,5 @@
-# Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-02).
-# Keep upstream Rust source and Cargo.lock unchanged. No release publication.
+# Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-03).
+# Preserve locked dependencies; targeted directory compatibility adapter. No release publication.
 name: Stalwart CLI — Windows Server 2008 R2 experiment
 
 on:
@@ -86,7 +86,16 @@ jobs:
           cargo "+$env:RUST_TOOLCHAIN" -Z build-std=std,panic_abort build --release --target $env:TARGET --manifest-path (Join-Path $smoke 'Cargo.toml')
           if ($LASTEXITCODE -ne 0) { throw "Minimal target compilation failed" }
 
-      - name: Compile upstream CLI with locked dependencies
+      - name: Test known-folder compatibility adapter on modern runner only
+        shell: pwsh
+        run: |
+          $testExe = Join-Path $env:RUNNER_TEMP 'cli-platform-dirs-tests.exe'
+          rustc "+$env:RUST_TOOLCHAIN" --edition=2024 --test src/platform_dirs.rs -o $testExe
+          if ($LASTEXITCODE -ne 0) { throw "Known-folder test compilation failed" }
+          & $testExe --nocapture | Tee-Object -FilePath evidence/platform-dirs-tests.txt
+          if ($LASTEXITCODE -ne 0) { throw "Known-folder tests failed" }
+
+      - name: Compile CLI with locked dependencies
         shell: pwsh
         run: |
           cargo "+$env:RUST_TOOLCHAIN" -Z build-std=std,panic_abort build --release --locked --target $env:TARGET --bin stalwart-cli
@@ -120,6 +129,12 @@ jobs:
             Format-Table -AutoSize | Out-String | Tee-Object -FilePath evidence/msvc-versions.txt
           & $dumpbin /headers /imports /dependents $exe | Tee-Object -FilePath evidence/pe-headers-imports.txt
           if ($LASTEXITCODE -ne 0) { throw "PE inspection failed" }
+          $pe = Get-Content evidence/pe-headers-imports.txt -Raw
+          if ($pe -match '(?im)^\s*combase\.dll\s*$') { throw "NT 6.1 loader blocker: combase.dll import" }
+          if ($pe -notmatch '(?im)^\s*ole32\.dll\s*$' -or $pe -notmatch '(?im)\bCoTaskMemFree\b') {
+            throw "Expected Ole32.dll / CoTaskMemFree import evidence missing"
+          }
+          "Targeted COMBASE regression gate PASS (not a full NT 6.1 import audit)" | Tee-Object -FilePath evidence/nt61-combase-gate.txt
 
       - name: Test version and help on modern CI runner only
         shell: pwsh
