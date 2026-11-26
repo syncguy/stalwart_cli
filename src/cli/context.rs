@@ -29,7 +29,7 @@ pub struct Context {
 impl Context {
     pub fn init(config: &Config) -> Result<Self> {
         let http = HttpClient::new(&config.connect)?;
-        let cache_base = dirs::cache_dir().ok_or(Error::NoCacheDir)?;
+        let cache_base = crate::platform_dirs::cache_dir().ok_or(Error::NoCacheDir)?;
         let cache = SchemaCache::new(&cache_base, &config.connect.url, process::id())?;
         let fetched = schema_fetch::fetch(&http, &cache);
         if let Some(refresh) = stale_refresh_error(&fetched) {
