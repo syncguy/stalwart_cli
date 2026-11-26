@@ -21,7 +21,7 @@ const APP_DIR: &str = "stalwart-cli";
 const AUTH_DIR: &str = "auth";
 
 pub fn auth_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join(APP_DIR).join(AUTH_DIR))
+    crate::platform_dirs::data_local_dir().map(|dir| dir.join(APP_DIR).join(AUTH_DIR))
 }
 
 pub fn token_store(url: &str) -> Option<TokenStore> {
