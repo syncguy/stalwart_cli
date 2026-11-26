@@ -1,5 +1,5 @@
-# Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-03).
-# Target-specific directory adapter; keep the lockfile and reject COMBASE. No release publication.
+# Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-04).
+# Legacy console compatibility; retain the directory/import gates. No release publication.
 name: Stalwart CLI — Windows Server 2008 R2 experiment
 
 on:
@@ -86,6 +86,11 @@ jobs:
             throw "NT 6.1 directory regression: dirs/dirs-sys present in target dependency graph"
           }
           "Target-specific directory dependency gate PASS" | Tee-Object -FilePath evidence/nt61-dirs-graph-gate.txt
+          if ($cfg -notcontains 'target_vendor="win7"') { throw "Target does not select the NT 6.1 Ratatui feature set" }
+          if ($graph -match '\bratatui(?:-core|-crossterm)? feature "underline-color"') {
+            throw "NT 6.1 TUI regression: unsupported underline-color enabled in dependency graph"
+          }
+          "NT 6.1 underline-color feature gate PASS (not a physical TUI test)" | Tee-Object -FilePath evidence/nt61-tui-graph-gate.txt
 
       - name: Compile minimal NT 6.1 smoke program
         shell: pwsh

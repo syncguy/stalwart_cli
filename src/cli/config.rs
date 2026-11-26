@@ -91,11 +91,20 @@ impl ColorRequest {
 
 impl ColorMode {
     fn detect(stream: &impl IsTerminal) -> Self {
-        Self::from_env(
+        let mode = Self::from_env(
             stream,
             env::var_os("NO_COLOR").as_deref(),
             env::var_os("TERM").as_deref(),
-        )
+        );
+        // Raw ANSI sequences are not interpreted by the legacy Windows console.
+        #[cfg(windows)]
+        {
+            use ratatui::crossterm::{Command, style::ResetColor};
+            if mode == Self::Enabled && !ResetColor.is_ansi_code_supported() {
+                return Self::Disabled;
+            }
+        }
+        mode
     }
 
     pub fn disabled_by_env() -> bool {

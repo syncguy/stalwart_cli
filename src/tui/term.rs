@@ -26,13 +26,34 @@ pub struct TerminalGuard {
     active: Arc<AtomicBool>,
 }
 
+// Crossterm implements bracketed paste only through ANSI/VT, not the
+// legacy Windows console API (including Windows Server 2008 R2).
+fn supports_bracketed_paste() -> bool {
+    #[cfg(windows)]
+    {
+        use ratatui::crossterm::Command;
+        EnableBracketedPaste.is_ansi_code_supported()
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
 pub fn write_enter(out: &mut impl Write) -> io::Result<()> {
-    queue!(out, EnterAlternateScreen, EnableBracketedPaste, Hide)?;
+    queue!(out, EnterAlternateScreen)?;
+    if supports_bracketed_paste() {
+        queue!(out, EnableBracketedPaste)?;
+    }
+    queue!(out, Hide)?;
     out.flush()
 }
 
 pub fn write_restore(out: &mut impl Write) -> io::Result<()> {
-    queue!(out, DisableBracketedPaste, LeaveAlternateScreen, Show)?;
+    if supports_bracketed_paste() {
+        queue!(out, DisableBracketedPaste)?;
+    }
+    queue!(out, LeaveAlternateScreen, Show)?;
     out.flush()
 }
 
