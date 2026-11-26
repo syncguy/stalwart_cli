@@ -1,5 +1,5 @@
 # Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-03).
-# Preserve locked dependencies; targeted directory compatibility adapter. No release publication.
+# Target-specific directory adapter; keep the lockfile and reject COMBASE. No release publication.
 name: Stalwart CLI — Windows Server 2008 R2 experiment
 
 on:
@@ -71,9 +71,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Visual Studio inventory failed" }
           $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib'
           Get-ChildItem $kits -Directory | Select-Object -ExpandProperty Name | Set-Content evidence/windows-sdk-versions.txt
+          rustc "+$env:RUST_TOOLCHAIN" --print cfg --target $env:TARGET |
+            Tee-Object -FilePath evidence/target-cfg.txt
+          if ($LASTEXITCODE -ne 0) { throw "Target cfg inventory failed" }
+          $cfg = Get-Content evidence/target-cfg.txt
+          if ($cfg -notcontains 'windows' -or $cfg -notcontains 'target_env="msvc"') {
+            throw "Target does not select the known-folder compatibility adapter"
+          }
           cargo "+$env:RUST_TOOLCHAIN" tree --locked --target $env:TARGET -e features |
             Tee-Object -FilePath evidence/dependency-features.txt
           if ($LASTEXITCODE -ne 0) { throw "Locked dependency feature inventory failed" }
+          $graph = Get-Content evidence/dependency-features.txt -Raw
+          if ($graph -match '\bdirs(?:-sys)? v[0-9]') {
+            throw "NT 6.1 directory regression: dirs/dirs-sys present in target dependency graph"
+          }
+          "Target-specific directory dependency gate PASS" | Tee-Object -FilePath evidence/nt61-dirs-graph-gate.txt
 
       - name: Compile minimal NT 6.1 smoke program
         shell: pwsh
