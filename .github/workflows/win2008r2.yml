@@ -102,9 +102,14 @@ jobs:
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $length = (Get-Item $exe).Length
           @("sha256=$sha", "bytes=$length") | Tee-Object -FilePath evidence/executable-sha256.txt
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vs = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw "MSVC installation not found" }
+          # Reuse the verified JSON inventory from the provenance step.
+          # Avoid the repeated property-only vswhere query that failed in the first run.
+          $instances = @(Get-Content evidence/visual-studio.json -Raw | ConvertFrom-Json)
+          if ($instances.Count -ne 1) { throw "Expected exactly one Visual Studio installation in the saved inventory" }
+          $vs = [string]$instances[0].installationPath
+          if ([string]::IsNullOrWhiteSpace($vs) -or -not (Test-Path -LiteralPath $vs -PathType Container)) {
+            throw "MSVC installation path missing or invalid in the saved inventory"
+          }
           $toolsVersionFile = Join-Path $vs 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt'
           $version = (Get-Content $toolsVersionFile -Raw).Trim()
           $bin = Join-Path $vs "VC\Tools\MSVC\$version\bin\Hostx64\x64"
