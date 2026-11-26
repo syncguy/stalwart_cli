@@ -21,6 +21,7 @@ mod cli;
 mod error;
 mod input;
 mod jmap;
+mod platform_dirs;
 mod plan;
 mod schema;
 #[cfg(all(test, stalwart_cli_tests))]
