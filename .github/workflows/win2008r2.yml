@@ -1,0 +1,137 @@
+# Stalwart CLI 2.0.0 — experimental NT 6.1 build (CLI-02).
+# Keep upstream Rust source and Cargo.lock unchanged. No release publication.
+name: Stalwart CLI — Windows Server 2008 R2 experiment
+
+on:
+  push:
+    branches:
+      - win2008r2
+    paths:
+      - .github/workflows/win2008r2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-win2008r2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'syncguy/stalwart_cli' && github.ref == 'refs/heads/win2008r2'
+    name: NT 6.1 cross-target build and PE evidence
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      RUST_TOOLCHAIN: nightly-2026-11-24
+      TARGET: x86_64-win7-windows-msvc
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_TERM_COLOR: never
+      AWS_LC_SYS_PREBUILT_NASM: "1"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain and std sources
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal --component rust-src
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Rust toolchain installation failed" }
+          rustc "+$env:RUST_TOOLCHAIN" --version --verbose
+          if ($LASTEXITCODE -ne 0) { throw "rustc version failed" }
+          cargo "+$env:RUST_TOOLCHAIN" --version
+          if ($LASTEXITCODE -ne 0) { throw "cargo version failed" }
+          $targets = rustc "+$env:RUST_TOOLCHAIN" --print target-list
+          if ($LASTEXITCODE -ne 0 -or $targets -notcontains $env:TARGET) {
+            throw "Pinned Rust toolchain does not recognize $env:TARGET"
+          }
+
+      - name: Record build provenance and dependency feature graph
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path evidence -Force | Out-Null
+          $sha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $sha -ne $env:GITHUB_SHA) { throw "Checkout SHA mismatch" }
+          @("source=$sha", "target=$env:TARGET", "toolchain=$env:RUST_TOOLCHAIN", "runner=$env:RUNNER_OS/$env:RUNNER_ARCH", "image=$env:ImageOS/$env:ImageVersion") |
+            Set-Content evidence/build-provenance.txt -Encoding utf8
+          rustc "+$env:RUST_TOOLCHAIN" --version --verbose | Tee-Object -FilePath evidence/build-provenance.txt -Append
+          if ($LASTEXITCODE -ne 0) { throw "rustc version failed" }
+          cargo "+$env:RUST_TOOLCHAIN" --version | Tee-Object -FilePath evidence/build-provenance.txt -Append
+          if ($LASTEXITCODE -ne 0) { throw "cargo version failed" }
+          rustup component list --toolchain $env:RUST_TOOLCHAIN --installed | Tee-Object -FilePath evidence/build-provenance.txt -Append
+          if ($LASTEXITCODE -ne 0) { throw "Rust component inventory failed" }
+          Get-FileHash Cargo.toml,Cargo.lock -Algorithm SHA256 | Format-List | Out-String | Add-Content evidence/build-provenance.txt
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw "vswhere not found" }
+          & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json |
+            Tee-Object -FilePath evidence/visual-studio.json
+          if ($LASTEXITCODE -ne 0) { throw "Visual Studio inventory failed" }
+          $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib'
+          Get-ChildItem $kits -Directory | Select-Object -ExpandProperty Name | Set-Content evidence/windows-sdk-versions.txt
+          cargo "+$env:RUST_TOOLCHAIN" tree --locked --target $env:TARGET -e features |
+            Tee-Object -FilePath evidence/dependency-features.txt
+          if ($LASTEXITCODE -ne 0) { throw "Locked dependency feature inventory failed" }
+
+      - name: Compile minimal NT 6.1 smoke program
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP 'cli-win7-smoke'
+          cargo "+$env:RUST_TOOLCHAIN" init --bin --name win7_smoke $smoke
+          if ($LASTEXITCODE -ne 0) { throw "Smoke cargo init failed" }
+          'fn main() { println!("NT 6.1 target smoke"); }' |
+            Set-Content (Join-Path $smoke 'src\main.rs') -Encoding utf8
+          cargo "+$env:RUST_TOOLCHAIN" -Z build-std=std,panic_abort build --release --target $env:TARGET --manifest-path (Join-Path $smoke 'Cargo.toml')
+          if ($LASTEXITCODE -ne 0) { throw "Minimal target compilation failed" }
+
+      - name: Compile upstream CLI with locked dependencies
+        shell: pwsh
+        run: |
+          cargo "+$env:RUST_TOOLCHAIN" -Z build-std=std,panic_abort build --release --locked --target $env:TARGET --bin stalwart-cli
+          if ($LASTEXITCODE -ne 0) { throw "Stalwart CLI cross-target compilation failed" }
+          git diff --exit-code -- Cargo.toml Cargo.lock src
+          if ($LASTEXITCODE -ne 0) { throw "Unexpected tracked Rust source or dependency changes during CI" }
+
+      - name: Hash binary and collect PE evidence
+        shell: pwsh
+        run: |
+          $exe = Join-Path "target\$env:TARGET\release" 'stalwart-cli.exe'
+          if (-not (Test-Path $exe)) { throw "Expected executable not found" }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $length = (Get-Item $exe).Length
+          @("sha256=$sha", "bytes=$length") | Tee-Object -FilePath evidence/executable-sha256.txt
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw "MSVC installation not found" }
+          $toolsVersionFile = Join-Path $vs 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt'
+          $version = (Get-Content $toolsVersionFile -Raw).Trim()
+          $bin = Join-Path $vs "VC\Tools\MSVC\$version\bin\Hostx64\x64"
+          $dumpbin = Join-Path $bin 'dumpbin.exe'
+          if (-not (Test-Path $dumpbin)) { throw "dumpbin not found" }
+          Get-Item (Join-Path $bin 'cl.exe'),(Join-Path $bin 'link.exe'),$dumpbin |
+            Select-Object Name,@{N='Version';E={$_.VersionInfo.FileVersion}} |
+            Format-Table -AutoSize | Out-String | Tee-Object -FilePath evidence/msvc-versions.txt
+          & $dumpbin /headers /imports /dependents $exe | Tee-Object -FilePath evidence/pe-headers-imports.txt
+          if ($LASTEXITCODE -ne 0) { throw "PE inspection failed" }
+
+      - name: Test version and help on modern CI runner only
+        shell: pwsh
+        run: |
+          $exe = Join-Path "target\$env:TARGET\release" 'stalwart-cli.exe'
+          & $exe --version | Tee-Object -FilePath evidence/runner-version.txt
+          if ($LASTEXITCODE -ne 0) { throw "Runner --version failed" }
+          & $exe --help | Tee-Object -FilePath evidence/runner-help.txt
+          if ($LASTEXITCODE -ne 0) { throw "Runner --help failed" }
+          'These observations are from Windows Server 2022, not NT 6.1.' | Set-Content evidence/runtime-scope.txt
+
+      - name: Upload executable and provenance (no release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stalwart-cli-win2008r2-EXPERIMENTAL
+          path: |
+            target/x86_64-win7-windows-msvc/release/stalwart-cli.exe
+            evidence/
+          if-no-files-found: error
+          retention-days: 7
